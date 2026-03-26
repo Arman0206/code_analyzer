@@ -3,14 +3,26 @@
 An AI-powered full-stack code analysis platform that detects bugs, security vulnerabilities, and code quality issues across multiple programming languages. It combines static analysis with LLM-based insights to provide deep and actionable feedback.
 
 🧠 Features
+
 🔍 Multi-language support (JavaScript, Python, Java, C++)
+
 🧪 Static analysis using AST parsing
+
 🤖 AI-powered code review using Groq LLM
+
 🔐 Sensitive data detection & redaction (API keys, secrets)
+
 📊 Code quality scoring system (bugs, security, complexity, lint)
+
 🧾 Automatic code formatting
+
 🔄 Diff visualization (original vs improved code)
+
 📈 Score history graph
+
+
+
+
 🏗️ Tech Stack
 Frontend
 React (Vite)
@@ -23,6 +35,9 @@ Express
 Groq SDK (LLM API)
 Acorn (JS AST)
 Java Parser
+
+
+
 ⚙️ How It Works
 User inputs code via Monaco Editor
 Backend detects language and runs static analysis
