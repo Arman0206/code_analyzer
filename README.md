@@ -1,6 +1,13 @@
 🚀 AI Code Analyzer
 
-An AI-powered full-stack code analysis platform that detects bugs, security vulnerabilities, and code quality issues across multiple programming languages. It combines static analysis with LLM-based insights to provide deep and actionable feedback.
+
+
+
+An AI-powered full-stack code analysis platform that detects bugs, security vulnerabilities, and code quality issues across multiple programming languages.
+It combines static analysis with LLM-based insights to provide deep and actionable feedback.
+
+
+
 
 🧠 Features
 
@@ -23,33 +30,66 @@ An AI-powered full-stack code analysis platform that detects bugs, security vuln
 
 
 
+
+
 🏗️ Tech Stack
+
+
 Frontend
+
 React (Vite)
+
 Monaco Editor
+
 Recharts
+
 GSAP
+
+
 Backend
+
 Node.js
+
 Express
+
 Groq SDK (LLM API)
+
 Acorn (JS AST)
+
 Java Parser
 
 
 
+
+
 ⚙️ How It Works
+
 User inputs code via Monaco Editor
+
 Backend detects language and runs static analysis
+
 Sensitive data is redacted before AI processing
+
 Groq LLM analyzes code for deeper insights
+
 Results are combined into a structured report
+
+
+
 Frontend displays:
+
 Bugs & lint issues
+
 Security warnings
+
 Suggestions
+
 Formatted code
+
 Diff output
+
+
+
 Score visualization
 📦 Installation
 1. Clone the repository
