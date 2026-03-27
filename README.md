@@ -4,6 +4,7 @@
 
 
 An AI-powered full-stack code analysis platform that detects bugs, security vulnerabilities, and code quality issues across multiple programming languages.
+
 It combines static analysis with LLM-based insights to provide deep and actionable feedback.
 
 
@@ -91,38 +92,55 @@ Diff output
 
 
 Score visualization
+
 📦 Installation
+
 1. Clone the repository
-git clone https://github.com/Arman0206/code_analyzer.git
+
+2.git clone https://github.com/Arman0206/code_analyzer.git
+
 cd code_analyzer
-2. Setup Backend
+
+ Setup Backend
+
 cd backend
+
 npm install
 
 Create .env file:
 
 GROQ_API_KEY=your_api_key_here
+
 PORT=8000
 
 Run backend:
 
 node server.js
+
 3. Setup Frontend
+
 cd frontend
+
 npm install
+
 npm run dev
+
 🌐 API Endpoint
+
 POST /solve
 
 Request:
 
 {
+
   "codeString": "your code here"
+  
 }
 
 Response:
 
 {
+
   "report": {
     "language": "javascript",
     "score": 85,
@@ -137,24 +155,34 @@ Response:
   }
 }
 🔐 Security Note
+
 .env files are ignored using .gitignore
+
 API keys are redacted before AI processing
+
 Never expose your API keys publicly
-📸 Screenshots (Optional)
+
 
 
 
 🚀 Future Improvements
+
 Support more programming languages
+
 Add real-time collaborative editing
+
 Improve AI suggestions with fine-tuning
+
 Deploy using Docker + cloud
 
 
 👨‍💻 Author
+
 Arman
+
 GitHub: https://github.com/Arman0206
 
 ⭐ Contribute
+
 
 Feel free to fork this repo, raise issues, and submit PRs!
