@@ -4,6 +4,7 @@ const { redactAndDetect } = require('./security');
 const { calculateFinalScore } = require('./maths');
 const router = require("./src/router");
 const diffEngine = require("./src/diff");
+const formatCode = require("./src/formatter");
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -30,14 +31,24 @@ async function fanalyze(baseReport) {
     
     const penalties = { sec: detections.length * 15, cplx: baseReport.complexity.cyclomatic > 8 ? (baseReport.complexity.cyclomatic - 8) * 5 : 0 };
     const scoreVal = calculateFinalScore(penalties);
-    
+
+    // Deterministic formatting instead of trusting the LLM to reproduce the whole file:
+    // Prettier for JS, a brace-indent pass for everything else. This can't silently
+    // rewrite logic the way an LLM regenerating the full source could.
+    const originalCode = baseReport.formatted; // router.js sets this to the raw input code
+    const localFormatted = await formatCode(originalCode, baseReport.language);
+    const localDiff = diffEngine(originalCode, localFormatted);
+
     return {
         language: baseReport.language, score: parseFloat(scoreVal.toFixed(2)),
         grade: scoreVal > 85 ? "A" : scoreVal > 70 ? "B" : "C",
         bugs: [...baseReport.bugs, ...(ai.bugs || [])], lint: [...baseReport.lint, ...(ai.lint || [])],
         security: [...detections.map(d => `${d.type} (Line ${d.line})`), ...(ai.aiSecurity || [])],
         complexity: baseReport.complexity, redundancy: ai.redundancy || [],
-        suggestions: ai.suggestions || [], formatted: ai.formatted || baseReport.formatted, diff: ai.diff || "No changes."
+        suggestions: ai.suggestions || [],
+        formatted: localFormatted,
+        diff: localDiff || "No changes.",
+        aiSuggestedRewrite: ai.formatted || null // keep the LLM's own rewrite available separately, clearly labeled
     };
 }
 

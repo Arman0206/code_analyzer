@@ -11,9 +11,9 @@ function basicBraceFormatter(code) {
   }
   return out.join("\n");
 }
-function formatCode(code, lang) {
+async function formatCode(code, lang) {
   try {
-    if (lang === "javascript") return prettier.format(code, { parser: "babel" });
+    if (lang === "javascript") return await prettier.format(code, { parser: "babel" });
     return basicBraceFormatter(code);
   } catch {
     return code;

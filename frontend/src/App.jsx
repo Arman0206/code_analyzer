@@ -3,6 +3,11 @@ import gsap from "gsap";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import Editor from "@monaco-editor/react";
 
+// In dev, Vite falls back to localhost:8000 if VITE_API_URL isn't set.
+// In production, set VITE_API_URL in your host's env settings (e.g. Vercel)
+// to your deployed backend's URL, e.g. https://code-analyzer-api.onrender.com
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 export default function App() {
   const input = useRef(null);
   const output = useRef(null);
@@ -34,13 +39,21 @@ export default function App() {
   const [diff, setDiff] = useState("");
   const [suggestions, setSuggestions] = useState([]);
 
+  // Load persisted score history from the backend so a page refresh doesn't wipe it.
+  useEffect(() => {
+    fetch(`${API_URL}/reports`)
+      .then((res) => res.json())
+      .then((data) => setScoreList((data.reports || []).map((r) => r.score).reverse()))
+      .catch((err) => console.error("Could not load history:", err));
+  }, []);
+
   async function sendRequest() {
     try {
       if (loadref.current) {
         gsap.set(loadref.current, { display: "flex" });
         gsap.fromTo(loadref.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
       }
-      const response = await fetch("http://localhost:8000/solve", {
+      const response = await fetch(`${API_URL}/solve`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codeString: codeval })
       });
       const data = await response.json();
