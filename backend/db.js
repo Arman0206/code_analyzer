@@ -1,9 +1,6 @@
 const { Pool } = require("pg");
+const { redactAndDetect } = require("./security");
 
-// One shared connection pool for the whole app - pg manages reusing/closing
-// connections internally. DATABASE_URL comes from .env, e.g.:
-// Local:  DATABASE_URL=postgres://user:password@localhost:5432/code_analyzer
-// Neon:   DATABASE_URL=postgres://user:password@ep-xxxx.neon.tech/dbname?sslmode=require
 const connectionString = process.env.DATABASE_URL;
 const needsSsl = connectionString && (connectionString.includes("sslmode=require") || connectionString.includes("neon.tech"));
 
@@ -13,14 +10,18 @@ const pool = new Pool({
 });
 
 pool.on("error", (err) => {
-  // A background/idle client error should not crash the whole server
   console.error("Unexpected Postgres pool error:", err);
 });
 
-// Creates the table if it doesn't exist yet. Call this once at startup
-// (see server.js) before accepting requests.
 async function initDb() {
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT,
+      google_id TEXT UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
     CREATE TABLE IF NOT EXISTS reports (
       id SERIAL PRIMARY KEY,
       language TEXT NOT NULL,
@@ -29,37 +30,58 @@ async function initDb() {
       code TEXT NOT NULL,
       report_json JSONB NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
+    );
+    ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+    CREATE INDEX IF NOT EXISTS idx_reports_user_created ON reports (user_id, created_at DESC);
   `);
 }
 
-async function saveReport(codeString, report) {
+// Same email via Google or OTP => same account.
+async function upsertUser({ email, name = null, googleId = null }) {
   const result = await pool.query(
-    `INSERT INTO reports (language, score, grade, code, report_json)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id`,
-    [report.language, report.score, report.grade, codeString, JSON.stringify(report)]
+    `INSERT INTO users (email, name, google_id) VALUES ($1, $2, $3)
+     ON CONFLICT (email) DO UPDATE SET
+       name = COALESCE(users.name, EXCLUDED.name),
+       google_id = COALESCE(users.google_id, EXCLUDED.google_id)
+     RETURNING id, email, name`,
+    [email.toLowerCase(), name, googleId]
+  );
+  return result.rows[0];
+}
+
+// Never persist secrets: redact the code AND every code-bearing field of the report.
+async function saveReport(userId, codeString, report) {
+  const redact = (text) => redactAndDetect(text || "").cleanCode;
+  const safeReport = {
+    ...report,
+    formatted: redact(report.formatted),
+    diff: redact(report.diff),
+    aiSuggestedRewrite: report.aiSuggestedRewrite ? redact(report.aiSuggestedRewrite) : null,
+  };
+  const result = await pool.query(
+    `INSERT INTO reports (user_id, language, score, grade, code, report_json)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [userId, report.language, report.score, report.grade, redact(codeString), JSON.stringify(safeReport)]
   );
   return result.rows[0].id;
 }
 
-// Lightweight rows only (no full report_json) - this is what feeds the score-over-time chart.
-async function getHistory(limit = 50) {
+// Only THIS user's rows.
+async function getHistory(userId, limit = 50) {
   const result = await pool.query(
     `SELECT id, language, score, grade, created_at
-     FROM reports ORDER BY id DESC LIMIT $1`,
-    [limit]
+     FROM reports WHERE user_id = $1 ORDER BY id DESC LIMIT $2`,
+    [userId, limit]
   );
   return result.rows;
 }
 
-// Full report for a single past submission, e.g. if a user clicks a history row.
-async function getReportById(id) {
-  const result = await pool.query(`SELECT * FROM reports WHERE id = $1`, [id]);
+// Ownership check in SQL: someone else's id simply returns "not found".
+async function getReportById(userId, id) {
+  const result = await pool.query(`SELECT * FROM reports WHERE id = $1 AND user_id = $2`, [id, userId]);
   const row = result.rows[0];
   if (!row) return null;
-  // report_json column is JSONB, pg already parses it into an object for us.
   return { ...row, report: row.report_json };
 }
 
-module.exports = { initDb, saveReport, getHistory, getReportById };
+module.exports = { pool, initDb, upsertUser, saveReport, getHistory, getReportById };

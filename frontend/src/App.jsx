@@ -1,138 +1,297 @@
-import React, { useState, useEffect, useRef } from "react";
-import gsap from "gsap";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
+import Login from "./Login";
+import { api } from "./api";
+import { useTheme } from "./hooks/useTheme";
+import { Logo, Sun, Moon } from "./components/Icons";
+import ScoreRing from "./components/ScoreRing";
+import IssuesPanel from "./components/IssuesPanel";
+import DiffView from "./components/DiffView";
+import HistoryPanel from "./components/HistoryPanel";
+import { countIssues, LANG_LABEL, MONACO_LANG } from "./lib/issues";
 
-// In dev, Vite falls back to localhost:8000 if VITE_API_URL isn't set.
-// In production, set VITE_API_URL in your host's env settings (e.g. Vercel)
-// to your deployed backend's URL, e.g. https://code-analyzer-api.onrender.com
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const EDITOR_OPTIONS = {
+  minimap: { enabled: false },
+  fontSize: 14,
+  fontFamily: "'JetBrains Mono Variable', ui-monospace, Consolas, monospace",
+  scrollBeyondLastLine: false,
+  padding: { top: 12, bottom: 12 },
+  automaticLayout: true,
+  tabSize: 2,
+};
 
-export default function App() {
-  const input = useRef(null);
-  const output = useRef(null);
-  const welcome_ref = useRef(null);
-  const coverref = useRef(null);
-  const loadref = useRef(null);
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
-  useEffect(() => {
-    if (welcome_ref.current && coverref.current) {
-      let t = gsap.timeline();
-      t.to(welcome_ref.current, { y: 14, opacity: 1, duration: 0.5 });
-      t.to(welcome_ref.current, { y: 0, delay: 1.2, opacity: 0, duration: 0.8 });
-      t.to(coverref.current, { opacity: 0, duration: 1, delay: -0.2 });
-      t.to(coverref.current, { display: "none", delay: -0.25 });
-    }
-  }, []);
+function Analyzer({ user, onLogout }) {
+  const [theme, toggleTheme] = useTheme();
+  const [code, setCode] = useState("");
+  const [editorLang, setEditorLang] = useState("javascript");
+  const [report, setReport] = useState(null);
+  const [cached, setCached] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("issues");
+  const [history, setHistory] = useState([]);
+  const [activeId, setActiveId] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const analyzeRef = useRef(null);
 
-  const [lang, setLang] = useState("javascript");
-  const [score, setScore] = useState(0);
-  const [grade, setGrade] = useState("");
-  const [complexity, setComplexity] = useState("");
-  const [formatted_code, setFormattedCode] = useState("");
-  const [bugs, setBugs] = useState([]);
-  const [codeval, setCodeVal] = useState("// Paste your code here...\n");
-  const [redundant, setRedundant] = useState([]);
-  const [security, setSecurity] = useState([]);
-  const [scorelist, setScoreList] = useState([]);
-  const [lint, setLint] = useState([]);
-  const [diff, setDiff] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
+  const monacoTheme = theme === "dark" ? "vs-dark" : "vs";
 
-  // Load persisted score history from the backend so a page refresh doesn't wipe it.
-  useEffect(() => {
-    fetch(`${API_URL}/reports`)
-      .then((res) => res.json())
-      .then((data) => setScoreList((data.reports || []).map((r) => r.score).reverse()))
-      .catch((err) => console.error("Could not load history:", err));
-  }, []);
-
-  async function sendRequest() {
+  const loadHistory = useCallback(async () => {
     try {
-      if (loadref.current) {
-        gsap.set(loadref.current, { display: "flex" });
-        gsap.fromTo(loadref.current, { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" });
-      }
-      const response = await fetch(`${API_URL}/solve`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codeString: codeval })
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setLang(data.report.language); 
-        setScore(data.report.score); 
-        setGrade(data.report.grade);
-        setFormattedCode(data.report.formatted); 
-        setBugs(data.report.bugs || []); 
-        setLint(data.report.lint || []);
-        setSecurity(data.report.security || []); 
-        setComplexity(data.report.complexity || ""); 
-        setRedundant(data.report.redundancy || []);
-        setSuggestions(data.report.suggestions || []); 
-        setDiff(data.report.diff || "");
-        setScoreList(prev => [...prev, data.report.score]);
-      } else {
-        alert(data.error || "Something went wrong");
-      }
-    } catch (err) { 
-      console.error(err);
-        alert("Server error. Is the backend running?");
+      const data = await api("/reports");
+      setHistory(data.reports || []);
+    } catch (err) {
+      if (err.status === 401) onLogout();
+    }
+  }, [onLogout]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  function showReport(next, wasCached = false) {
+    setReport(next);
+    setCached(wasCached);
+    setEditorLang(MONACO_LANG[next.language] || "javascript");
+  }
+
+  async function analyze() {
+    if (loading || !code.trim()) return;
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api("/solve", { method: "POST", body: { codeString: code } });
+      showReport(data.report, data.cached);
+      setActiveId(data.report.id);
+      setTab("issues");
+      loadHistory();
+    } catch (err) {
+      if (err.status === 401) onLogout(); // session expired: back to the login screen
+      else setError(err.message); // 400 / 422 / 429 messages come straight from the API
     } finally {
-      if (loadref.current) {
-        gsap.to(loadref.current, { opacity: 0, duration: 0.4, onComplete: () => gsap.set(loadref.current, { display: "none" }) });
-      }
+      setLoading(false);
     }
   }
 
-  const getMonacoLanguage = (detectedLang) => {
-    const map = { cpp: "cpp", java: "java", python: "python", javascript: "javascript" };
-    return map[detectedLang] || "javascript";
-  };
+  // The Monaco shortcut is registered once, so it calls through a ref to always run the latest analyze().
+  useEffect(() => {
+    analyzeRef.current = analyze;
+  });
+
+  function handleEditorMount(editor, monaco) {
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => analyzeRef.current?.());
+  }
+
+  async function openReport(id) {
+    setError("");
+    try {
+      const data = await api(`/reports/${id}`);
+      setCode(data.code);
+      showReport(data.report);
+      setActiveId(id);
+      setTab("issues");
+    } catch (err) {
+      if (err.status === 401) onLogout();
+      else setError(err.message);
+    }
+  }
+
+  async function copyFormatted() {
+    try {
+      await navigator.clipboard.writeText(report.formatted);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("Couldn't copy to the clipboard. Select the code and copy it manually.");
+    }
+  }
+
+  const issueCount = countIssues(report);
+  const tabs = [
+    { id: "issues", label: "Issues", count: report ? issueCount : null },
+    { id: "diff", label: "Diff" },
+    { id: "formatted", label: "Formatted code" },
+    { id: "history", label: "History", count: history.length || null },
+  ];
+
+  function renderPanel() {
+    if (tab === "history") return <HistoryPanel items={history} activeId={activeId} onOpen={openReport} />;
+    if (!report) {
+      if (loading) {
+        return (
+          <div className="skeleton" aria-hidden="true">
+            <span style={{ width: "40%" }} />
+            <span style={{ width: "90%" }} />
+            <span style={{ width: "75%" }} />
+            <span style={{ width: "85%" }} />
+          </div>
+        );
+      }
+      return (
+        <div className="empty">
+          <h3>No analysis yet</h3>
+          <p>Paste code on the left, then choose Analyze code. Results appear here.</p>
+        </div>
+      );
+    }
+    if (tab === "issues") return <IssuesPanel report={report} />;
+    if (tab === "diff") return <DiffView diff={report.diff} />;
+    return null; // "formatted" renders its own layout below
+  }
 
   return (
-    <>
-      <div id="loader" ref={loadref}><div id="circle"></div></div>
-      <div id="cover" ref={coverref}><h1 ref={welcome_ref}>welcome</h1></div>
-      <div id="main">
-        <div id="combine">
-          <div id="input_box" ref={input}>
-            <h1>paste your code below</h1>
-            <div id="texty">
-              <div style={{ borderRadius: "12px", overflow: "hidden", border: "1px solid var(--border)", marginBottom: "10px" }}>
-                <Editor height="450px" language="javascript" theme="vs-dark" value={codeval} onChange={(val) => setCodeVal(val || "")} options={{ minimap: { enabled: false }, fontSize: 14 }} />
+    <div className="app">
+      <header className="topbar">
+        <div className="brand">
+          <Logo />
+          <span>Code Analyzer</span>
+        </div>
+        <div className="topbar-actions">
+          <span className="user-email" title={user.email}>{user.email}</span>
+          <button type="button" className="btn btn-ghost btn-icon" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
+            {theme === "dark" ? <Sun /> : <Moon />}
+          </button>
+          <button type="button" className="btn btn-sm" onClick={onLogout}>Log out</button>
+        </div>
+      </header>
+
+      <main className="workspace">
+        <section className="pane" aria-label="Code input">
+          <div className="pane-head">
+            <h2 className="pane-title">Code</h2>
+            <div className="pane-head-actions">
+              <span className="chip">{report ? LANG_LABEL[report.language] || report.language : "Language is auto-detected"}</span>
+              {code && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setCode(""); setReport(null); setActiveId(null); setError(""); }}>
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="editor-wrap">
+            {!code && <div className="editor-hint">Paste JavaScript, Python, Java or C++ here</div>}
+            <Editor
+              height="100%"
+              language={editorLang}
+              theme={monacoTheme}
+              value={code}
+              onChange={(val) => setCode(val || "")}
+              onMount={handleEditorMount}
+              options={EDITOR_OPTIONS}
+            />
+          </div>
+          <div className="pane-foot">
+            <span className="hint">
+              Run with <kbd>{IS_MAC ? "⌘" : "Ctrl"}</kbd> <kbd>Enter</kbd>
+            </span>
+            <button type="button" className="btn btn-primary" onClick={analyze} disabled={loading || !code.trim()}>
+              {loading && <span className="spinner" aria-hidden="true" />}
+              {loading ? "Analyzing" : "Analyze code"}
+            </button>
+          </div>
+        </section>
+
+        <section className="pane pane-results" aria-label="Analysis results" aria-busy={loading}>
+          <div className="pane-head">
+            <h2 className="pane-title">Review</h2>
+            {report && <span className="chip">{cached ? "Cached result, no AI call used" : "Fresh analysis"}</span>}
+          </div>
+          {loading && <div className="progress" role="progressbar" aria-label="Analyzing your code" />}
+          {error && (
+            <div className="banner banner-error" role="alert">
+              <span>{error}</span>
+              <button type="button" onClick={() => setError("")}>Dismiss</button>
+            </div>
+          )}
+          {report && report.aiUsed === false && (
+            <div className="banner banner-warn" role="status">
+              The AI review was unavailable, so these results come from static analysis only.
+            </div>
+          )}
+
+          {report && (
+            <div className="summary">
+              <ScoreRing score={report.score} grade={report.grade} />
+              <dl className="facts">
+                <div className="fact">
+                  <dt>Language</dt>
+                  <dd>{LANG_LABEL[report.language] || report.language}</dd>
+                </div>
+                <div className="fact">
+                  <dt>Complexity</dt>
+                  <dd className="mono">{report.complexity?.cyclomatic ?? "n/a"}</dd>
+                </div>
+                <div className="fact">
+                  <dt>Issues</dt>
+                  <dd className="mono">{issueCount}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
+
+          <div className="tabs" role="tablist" aria-label="Result sections">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                id={`tab-${t.id}`}
+                aria-selected={tab === t.id}
+                aria-controls="result-panel"
+                className="tab"
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+                {t.count ? <span className="count">{t.count}</span> : null}
+              </button>
+            ))}
+          </div>
+
+          {tab === "formatted" && report ? (
+            <div className="panel panel-flush" role="tabpanel" id="result-panel" aria-labelledby="tab-formatted">
+              <div className="subbar">
+                <span className="hint">Read-only</span>
+                <button type="button" className="btn btn-sm" onClick={copyFormatted}>{copied ? "Copied" : "Copy code"}</button>
               </div>
-              <div id="arrange"><button type="button" id="give_code" onClick={sendRequest}>Submit</button></div>
+              <div className="editor-wrap">
+                <Editor
+                  height="100%"
+                  language={MONACO_LANG[report.language] || "javascript"}
+                  theme={monacoTheme}
+                  value={report.formatted}
+                  options={{ ...EDITOR_OPTIONS, readOnly: true }}
+                />
+              </div>
             </div>
-          </div>
-          <div id="graph_box">
-            <h2>Score History</h2>
-            <ResponsiveContainer width="100%" height={350}>
-              <LineChart data={scorelist.map((v, i) => ({ sub: i + 1, score: v }))} margin={{ top: 20, right: 30, left: 40, bottom: 40 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                <XAxis dataKey="sub" stroke="#9ca3af" />
-                <YAxis stroke="#9ca3af" />
-                <Tooltip contentStyle={{ backgroundColor: "#1f2330", border: "none", borderRadius: "8px" }} />
-                <Line type="monotone" dataKey="score" stroke="#818cf8" strokeWidth={3} dot={{ r: 5, fill: "#818cf8" }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-        <div id="output_box" ref={output}>
-          <h1>Code review</h1>
-          <div id="output_fields">
-            <h3>language : {lang}</h3><h3>score : {score}</h3><h3>grade : {grade}</h3><h3>complexity : {complexity.cyclomatic || complexity}</h3>
-            <h3>bugs : </h3><div className="suggest">{bugs.length === 0 ? <p>No Bugs</p> : bugs.map((val, idx) => <li key={idx}>{val.message || val}</li>)}</div>
-            <h3>lint :</h3><div className="suggest">{lint.length === 0 ? <p>No lint</p> : lint.map((val, idx) => <li key={idx}>{val.message || val}</li>)}</div>
-            <h3>security : </h3><div className="suggest">{security.length === 0 ? <p>No Security issues</p> : security.map((val, idx) => <li key={idx}>{val}</li>)}</div>
-            <h3>redundancy : </h3><div className="suggest">{redundant.length === 0 ? <p>No Redundancy</p> : redundant.map((val, idx) => <li key={idx}>{val}</li>)}</div>
-            <h3>suggestions :</h3><div className="suggest">{suggestions.length === 0 ? <p>No suggestions</p> : suggestions.map((val, idx) => <li key={idx}>Line : {val.line}, Fix : {val.fix}</li>)}</div>
-            <h3 style={{marginTop: "20px"}}>diff :</h3><div className="suggest" style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: "12px", color: "#d1d5db" }}>{diff || "No diff generated."}</div>
-            <h3 style={{marginTop: "20px"}}>formatted version of code : </h3>
-            <div style={{ borderRadius: "12px", overflow: "hidden", border: "1px solid var(--border)" }}>
-              <Editor height="400px" language={getMonacoLanguage(lang)} theme="vs-dark" value={formatted_code} options={{ readOnly: true, minimap: { enabled: false }, fontSize: 14 }} />
+          ) : (
+            <div className="panel" role="tabpanel" id="result-panel" aria-labelledby={`tab-${tab}`}>
+              {renderPanel()}
             </div>
-          </div>
-        </div>
-      </div>
-    </>
+          )}
+        </section>
+      </main>
+    </div>
   );
+}
+
+// Auth gate: ask the server "who am I?" once on load, then show Login or the app.
+export default function App() {
+  const [user, setUser] = useState(undefined); // undefined = still checking, null = logged out
+
+  useEffect(() => {
+    api("/auth/me")
+      .then((d) => setUser(d.user))
+      .catch(() => setUser(null));
+  }, []);
+
+  const logout = useCallback(async () => {
+    await api("/auth/logout", { method: "POST" }).catch(() => {});
+    setUser(null);
+  }, []);
+
+  if (user === undefined) return <div className="boot" role="status">Loading…</div>;
+  if (!user) return <Login onLogin={setUser} />;
+  return <Analyzer user={user} onLogout={logout} />;
 }

@@ -8,19 +8,25 @@ function detect(code, filename = "") {
     if (filename.endsWith(".js")) return { lang: "javascript", confidence: 0.95 };
     if (filename.endsWith(".py")) return { lang: "python", confidence: 0.95 };
     if (filename.endsWith(".java")) return { lang: "java", confidence: 0.95 };
-    if (filename.endsWith(".cpp") || filename.endsWith(".c")) return { lang: "cpp", confidence: 0.95 };
+    if (/\.(cpp|cc|c|h|hpp)$/.test(filename)) return { lang: "cpp", confidence: 0.95 };
   }
-  if (code.includes("def ") && code.includes(":")) return { lang: "python", confidence: 0.6 };
- // if (code.includes("const ") || code.includes("let ") || code.includes("=>")) return { lang: "javascript", confidence: 0.6 };
-  if (code.includes("const ") || code.includes("let ") || code.includes("=>") || code.includes("var ") || code.includes("function ") || code.includes("console.log")) return { lang: "javascript", confidence: 0.6 };
- if (code.includes("public static void main")) return { lang: "java", confidence: 0.8 };
-  if (code.includes("#include ")) return { lang: "cpp", confidence: 0.8 };
+  // Most unique signals first; generic JS keywords (const/let/function) come LAST.
+  if (/^\s*#include\s*[<"]/m.test(code)) return { lang: "cpp", confidence: 0.85 };
+  if (
+    /\b(public|private|protected)\s+(static\s+)?(final\s+)?(class|interface|enum)\b/.test(code) ||
+    /public\s+static\s+void\s+main/.test(code) ||
+    /System\.out\.print/.test(code)
+  ) return { lang: "java", confidence: 0.85 };
+  if (/^\s*def\s+\w+\s*\(.*\)\s*:/m.test(code) || /^\s*(elif\b.*:|print\()/m.test(code))
+    return { lang: "python", confidence: 0.7 };
+  if (/\b(const|let|var|function)\b|=>|console\.log/.test(code)) return { lang: "javascript", confidence: 0.6 };
   return { lang: "unknown", confidence: 0 };
 }
 
 async function route(code, filename = "") {
   const { lang, confidence } = detect(code, filename);
-  if (lang === "unknown") throw new Error("Unsupported language or syntax.");
+  if (lang === "unknown")
+    throw Object.assign(new Error("Unsupported language or syntax."), { status: 422 });
 
   const report = {
     language: lang, confidence: confidence, score: 100, grade: "A+",
@@ -37,4 +43,4 @@ async function route(code, filename = "") {
   }
   return report;
 }
-module.exports = { route };
+module.exports = { route, detect };
