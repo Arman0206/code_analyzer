@@ -364,8 +364,6 @@ Grades: **A** above 85, **B** above 70, otherwise **C**. Weights must sum to 1, 
 - Secrets are redacted before code is sent to the LLM **and** before code, formatted output, diff and rewrite are stored.
 - All SQL is parameterized. Inputs, environment variables and AI output are validated with Zod.
 - Helmet security headers, a strict CORS origin, a request size limit and rate limiting on every route.
-- `.env` files are git-ignored and must never be committed. If a secret is ever committed, rotate it at the provider and remove it from history. `.gitignore` only prevents future commits.
-- Secret detection is pattern-based and best effort. Treat the database as sensitive anyway, and keep its connection string private.
 
 ---
 
