@@ -1,10 +1,10 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Static analysis + AI code review with a CI quality gate",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test",
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
@@ -29,9 +29,16 @@
     "pg": "^8.22.0",
     "prettier": "^3.8.1",
     "rate-limit-redis": "^6.0.1",
+    "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
+  },
+  "bin": {
+    "code-analyzer": "bin/analyzer.js"
+  },
+  "engines": {
+    "node": ">=18.3"
   }
 }

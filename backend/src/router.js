@@ -5,7 +5,7 @@ const cpp = require("./languages/cpp");
 
 function detect(code, filename = "") {
   if (filename) {
-    if (filename.endsWith(".js")) return { lang: "javascript", confidence: 0.95 };
+   if (/\.(js|mjs|cjs)$/.test(filename)) return { lang: "javascript", confidence: 0.95 };
     if (filename.endsWith(".py")) return { lang: "python", confidence: 0.95 };
     if (filename.endsWith(".java")) return { lang: "java", confidence: 0.95 };
     if (/\.(cpp|cc|c|h|hpp)$/.test(filename)) return { lang: "cpp", confidence: 0.95 };
