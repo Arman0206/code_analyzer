@@ -1,0 +1,125 @@
+name: "Code Analyzer Quality Gate"
+description: "Scores every pull request (AST analysis + optional LLM review), comments the results, and fails the build below your threshold."
+author: "Arman0206"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  path:
+    description: "File or directory to analyze (relative to the workspace)."
+    default: "."
+  config:
+    description: "Path to the config file. Defaults to .analyzer.yml if it exists."
+    default: ""
+  min-score:
+    description: "Override min_score from the config (0-100)."
+    default: ""
+  changed-only:
+    description: "On pull requests, analyze only files changed relative to the base branch. Needs actions/checkout with fetch-depth: 0."
+    default: "true"
+  ai:
+    description: "Add an LLM review of the weakest files. Needs groq-api-key."
+    default: "false"
+  groq-api-key:
+    description: "Groq API key (store it as a repository secret)."
+    default: ""
+  comment:
+    description: "Post or update a summary comment on the pull request."
+    default: "true"
+  github-token:
+    description: "Token used to post the comment (needs pull-requests: write)."
+    default: ${{ github.token }}
+
+outputs:
+  score:
+    description: "Overall score (0-100)."
+    value: ${{ steps.analyze.outputs.score }}
+  passed:
+    description: "'true' if the quality gate passed."
+    value: ${{ steps.analyze.outputs.passed }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+
+    - name: Install analyzer
+      shell: bash
+      working-directory: ${{ github.action_path }}/backend
+      run: npm ci --omit=dev --no-audit --no-fund
+
+    - name: Analyze
+      id: analyze
+      shell: bash
+      # Inputs go through env vars, never interpolated into the script (avoids shell injection).
+      env:
+        IN_PATH: ${{ inputs.path }}
+        IN_CONFIG: ${{ inputs.config }}
+        IN_MIN_SCORE: ${{ inputs.min-score }}
+        IN_CHANGED_ONLY: ${{ inputs.changed-only }}
+        IN_AI: ${{ inputs.ai }}
+        GROQ_API_KEY: ${{ inputs.groq-api-key }}
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        args=("$IN_PATH" --markdown-file "$RUNNER_TEMP/ca-report.md" --json-file "$RUNNER_TEMP/ca-report.json")
+        [ -n "$IN_CONFIG" ] && args+=(--config "$IN_CONFIG")
+        [ -n "$IN_MIN_SCORE" ] && args+=(--min-score "$IN_MIN_SCORE")
+        [ "$IN_AI" = "true" ] && args+=(--ai)
+        if [ "$IN_CHANGED_ONLY" = "true" ] && [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_REF" ]; then
+          args+=(--changed "origin/$BASE_REF")
+        fi
+
+        set +e
+        node "$GITHUB_ACTION_PATH/backend/bin/analyzer.js" "${args[@]}"
+        code=$?
+        set -e
+
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        if [ -f "$RUNNER_TEMP/ca-report.json" ]; then
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/ca-report.json", "utf8"));
+            const fs = require("fs");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `score=${r.summary.score}\npassed=${r.gate.passed}\n`);
+          '
+          cat "$RUNNER_TEMP/ca-report.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Comment on pull request
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        REPORT_PATH: ${{ runner.temp }}/ca-report.md
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require("fs");
+          if (!fs.existsSync(process.env.REPORT_PATH)) return;
+          const body = fs.readFileSync(process.env.REPORT_PATH, "utf8");
+          const marker = "<!-- code-analyzer-report -->";
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          try {
+            // Update our previous comment instead of adding a new one on every push.
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+          } catch (e) {
+            // PRs from forks get a read-only token. The summary tab still has the report, so don't fail for this.
+            core.warning(`Could not post PR comment: ${e.message}`);
+          }
+
+    - name: Enforce quality gate
+      if: ${{ always() }}
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.analyze.outputs.exit-code }}
+      run: |
+        if [ "${EXIT_CODE:-2}" != "0" ]; then
+          echo "::error::Code Analyzer quality gate did not pass (exit code ${EXIT_CODE:-unknown}). See the report above."
+          exit "${EXIT_CODE:-2}"
+        fi

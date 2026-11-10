@@ -1,0 +1,9 @@
+# Quality gate for this repository. See README, "CLI and CI quality gate".
+min_score: 80            # overall score (weighted by lines of code) must be at least this
+min_file_score: 60       # and no single file may drop below this
+fail_on_security: true   # any hardcoded secret / eval / os.system finding fails the build
+max_complexity: 15       # cyclomatic points above this (per function) cost score
+
+exclude:
+  - test                 # tests contain deliberately bad code (e.g. fake secrets)
+  - frontend             # the analyzer has no JSX support
